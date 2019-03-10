@@ -69,11 +69,11 @@ func (e *ChessEngine) Depth(depth int) (Result, error) {
 		}
 
 		if strings.HasPrefix(line, "bestmove") {
-			sp := strings.Split(line, " ")
+			sp := strings.Split(strings.Trim(line, "\n"), " ")
 			r.BestMove = sp[1]
 
 			if len(sp) > 2 {
-				r.Ponder = strings.Trim(sp[3], "\n")
+				r.Ponder = sp[3]
 			}
 			return r, err
 		}
