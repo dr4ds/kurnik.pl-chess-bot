@@ -258,8 +258,7 @@ func (q *KurnikBot) SendBestMove(p PayloadIntString) {
 	r := ((d1*8+d0)*8+p1)*8 + p0
 
 	if len(res.BestMove) > 4 {
-		fmt.Println("promotion")
-		r = (IndexByte(res.BestMove[5], promotionOptions)+1)*4096 + r
+		r = (IndexByte(res.BestMove[4], promotionOptions)+1)*4096 + r
 	}
 
 	elapsed := time.Since(start)
