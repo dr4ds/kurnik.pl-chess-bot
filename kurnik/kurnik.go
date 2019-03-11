@@ -1,14 +1,17 @@
-package main
+package kurnik
 
 import (
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
 	"net/url"
 	"strings"
-	"sync"
 	"time"
+
+	"../uci"
+	"../utils"
 
 	"github.com/notnil/chess"
 
@@ -18,6 +21,26 @@ import (
 
 	"github.com/gorilla/websocket"
 )
+
+const userAgent = `Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:66.0) Gecko/20100101 Firefox/66.0`
+
+var x = []byte("abcdefgh")
+var y = []byte("87654321")
+
+var promotionOptions = []byte("qnbr")
+
+type PlayerList map[string]User
+type RoomList map[int]Room
+
+type BotSettings struct {
+	Account struct {
+		Login    string `json:"login"`
+		Password string `json:"password"`
+	} `json:"account"`
+	EngineDepth   int               `json:"engine_depth"`
+	EnginePath    string            `json:"engine_path"`
+	EngineOptions map[string]string `json:"engine_options"`
+}
 
 type PayloadInt struct {
 	I []int `json:"i"`
@@ -39,25 +62,27 @@ type Player struct {
 	User           User
 	CurrentSection string
 	CurrentSeat    int
+	RatingChange   []int
 }
 
 type KurnikBot struct {
 	Connection     *websocket.Conn
 	CurrentPlayer  Player
 	CurrentSection string
-	RoomList       map[int]Room
+	RoomList       RoomList
 	SectionsList   []string
-	PlayerList     map[string]User
+	PlayerList     PlayerList
 	Game           Game
-	Engine         *ChessEngine
+	Engine         *uci.ChessEngine
 	Running        bool
+	BotSettings    BotSettings
 }
 
 type Game struct {
-	Mux        sync.Mutex
-	Turn       int
-	Chess      *chess.Game
-	ColorWhite bool
+	Turn      int
+	Chess     *chess.Game
+	IsWhite   bool
+	EloChange EloChange
 }
 
 type Seat struct {
@@ -65,12 +90,39 @@ type Seat struct {
 	Taken  bool
 }
 
+type OpenedRoom struct {
+	Base       Room
+	PlayerList PlayerList
+}
 type Room struct {
 	N      int
 	InGame bool
 	Time   string
 	Seat1  Seat
 	Seat2  Seat
+}
+
+type Move struct {
+	BestMove    string
+	From        string
+	To          string
+	isPromotion bool
+}
+type EloChange struct {
+	Win  int
+	Loss int
+	Draw int
+}
+
+// K=32
+func CalculateEloChange(e1, e2 int) EloChange {
+	diff := float64(e2 - e1)
+	precentage := float64(1 / (1 + math.Pow(10, diff/400)))
+	return EloChange{
+		int(math.Round(32 * (1 - precentage))),
+		int(math.Round(32 * (.5 - precentage))),
+		int(math.Round(32 * (precentage))),
+	}
 }
 
 func (q *KurnikBot) NewRoomObject(i []int, s []string) Room {
@@ -160,7 +212,6 @@ func (q *KurnikBot) CreateRoom() {
 
 func (q *KurnikBot) TakeSeat(seat int) {
 	p := PayloadInt{[]int{83, q.CurrentPlayer.User.RoomID, seat}}
-	q.CurrentPlayer.CurrentSeat = seat
 	q.SendMessage(&p)
 }
 
@@ -180,8 +231,11 @@ func (q *KurnikBot) ConnectToWebSocketServer() {
 	q.Running = true
 }
 
-func (q *KurnikBot) Disconnect() {
-	q.Connection.Close()
+func (q *KurnikBot) Exit() error {
+	q.Running = false
+	err := q.Engine.Close()
+	err = q.Connection.Close()
+	return err
 }
 
 func (q *KurnikBot) StartListening() {
@@ -234,43 +288,45 @@ func (q *KurnikBot) HandleCommands(p PayloadIntString) {
 	}
 }
 
-func (q *KurnikBot) SendBestMove(p PayloadIntString) {
-	start := time.Now()
-
+func (q *KurnikBot) GetMoveFromEngine() (Move, error) {
+	m := Move{}
 	err := q.Engine.SetFEN(q.Game.Chess.FEN())
 	if err != nil {
-		panic(err)
+		return m, err
 	}
 
-	res, err := q.Engine.Depth(20)
+	res, err := q.Engine.Depth(q.BotSettings.EngineDepth)
 	if err != nil {
-		panic(err)
+		return m, err
 	}
 
-	from := res.BestMove[:2]
-	to := res.BestMove[2:4]
+	m.BestMove = res.BestMove
+	m.From = res.BestMove[:2]
+	m.To = res.BestMove[2:4]
 
-	p0 := IndexByte(from[0], x)
-	p1 := IndexByte(from[1], y)
-	d0 := IndexByte(to[0], x)
-	d1 := IndexByte(to[1], y)
+	if len(res.BestMove) > 4 {
+		m.isPromotion = true
+	}
+	return m, err
+}
+
+func CalculateMove(m Move) int {
+	p0 := utils.IndexByte(m.From[0], x)
+	p1 := utils.IndexByte(m.From[1], y)
+	d0 := utils.IndexByte(m.To[0], x)
+	d1 := utils.IndexByte(m.To[1], y)
 
 	r := ((d1*8+d0)*8+p1)*8 + p0
 
-	if len(res.BestMove) > 4 {
-		r = (IndexByte(res.BestMove[4], promotionOptions)+1)*4096 + r
+	if m.isPromotion {
+		r = (utils.IndexByte(m.BestMove[4], promotionOptions)+1)*4096 + r
 	}
+	return r
+}
 
-	elapsed := time.Since(start)
-	t := elapsed.Nanoseconds() / 100000000
-	if t <= 0 {
-		t = 1
-	}
-
+func (q *KurnikBot) SendMove(m Move, time int64) {
 	sp := PayloadInt{}
-	sp.I = []int{92, q.CurrentPlayer.User.RoomID, 1, r, int(t)}
-	fmt.Println(sp)
-	// {"i":[92,2301,1,2356,47]}
+	sp.I = []int{92, q.CurrentPlayer.User.RoomID, 1, CalculateMove(m), int(time)}
 	q.SendMessage(&sp)
 }
 
@@ -281,7 +337,20 @@ func (q *KurnikBot) RecieveRoomCreation(p PayloadIntString) {
 func (q *KurnikBot) RecievePossibleMoves(p PayloadIntString) {
 	q.Game.Turn = p.I[3]
 	if q.Game.Turn > -1 && q.CurrentPlayer.CurrentSeat == q.Game.Turn {
-		q.SendBestMove(p)
+		start := time.Now()
+
+		m, err := q.GetMoveFromEngine()
+		if err != nil {
+			panic(err)
+		}
+
+		elapsed := time.Since(start)
+		t := elapsed.Nanoseconds() / 100000000
+		if t <= 0 {
+			t = 1
+		}
+
+		q.SendMove(m, t)
 	}
 }
 
@@ -290,7 +359,6 @@ func (q *KurnikBot) RecieveRoomSeat(p PayloadIntString) {
 }
 
 func (q *KurnikBot) ReceiveMove(p PayloadIntString) {
-	fmt.Println("received move", p.S[0])
 	err := q.Game.Chess.MoveStr(p.S[0])
 	if err != nil {
 		panic(err)
@@ -300,8 +368,23 @@ func (q *KurnikBot) ReceiveMove(p PayloadIntString) {
 func (q *KurnikBot) HandleStartGame(p PayloadIntString) {
 	q.Game.Chess = chess.NewGame(chess.UseNotation(chess.AlgebraicNotation{}))
 	if len(p.I) <= 2 {
-		q.Game.ColorWhite = true
+		q.Game.IsWhite = true
 	}
+	room := q.GetCurrentRoom()
+
+	var e1, e2 int
+	if q.CurrentPlayer.CurrentSeat == 0 {
+		e1 = room.Seat1.Player.Rating
+		e2 = room.Seat2.Player.Rating
+	} else {
+		e1 = room.Seat2.Player.Rating
+		e2 = room.Seat1.Player.Rating
+	}
+	q.Game.EloChange = CalculateEloChange(e1, e2)
+}
+
+func (q *KurnikBot) GetCurrentRoom() Room {
+	return q.RoomList[q.CurrentPlayer.User.RoomID]
 }
 
 func (q *KurnikBot) ReceiveSectionsList(p PayloadIntString) {
@@ -315,12 +398,20 @@ func (q *KurnikBot) ReceiveSectionsList(p PayloadIntString) {
 }
 
 func (q *KurnikBot) HandlePlayerUpdate(p PayloadIntString) {
-	pl := User{}
-	pl.Rating = p.I[3]
-	pl.RoomID = p.I[2]
-	pl.N = p.I[1]
+	u := User{}
+	u.Rating = p.I[3]
+	u.RoomID = p.I[2]
+	u.N = p.I[1]
+	u.Name = p.S[0]
 
-	q.PlayerList[p.S[0]] = pl
+	q.PlayerList[p.S[0]] = u
+	if q.CurrentPlayer.User.Name == u.Name {
+		q.CurrentPlayer.User = u
+
+		if q.CurrentPlayer.RatingChange[len(q.CurrentPlayer.RatingChange)-1] != u.Rating {
+			q.CurrentPlayer.RatingChange = append(q.CurrentPlayer.RatingChange, u.Rating)
+		}
+	}
 }
 
 func (q *KurnikBot) HandlePlayerLeave(p PayloadIntString) {
@@ -332,7 +423,7 @@ func (q *KurnikBot) ReceiveCreateRoom(p PayloadIntString) {
 }
 
 func (q *KurnikBot) ReceiveRoomList(p PayloadIntString) {
-	q.RoomList = make(map[int]Room)
+	q.RoomList = make(RoomList)
 
 	j := 0
 	for i := 3; i < len(p.I)-3; i += 4 {
@@ -365,6 +456,13 @@ func (q *KurnikBot) ReceiveUsername(p PayloadIntString) {
 
 func (q *KurnikBot) ReceiveRating(p PayloadIntString) {
 	q.CurrentPlayer.User.Rating = p.I[1]
+
+	if len(q.CurrentPlayer.RatingChange) != 0 {
+		if q.CurrentPlayer.RatingChange[len(q.CurrentPlayer.RatingChange)-1] == p.I[1] {
+			return
+		}
+	}
+	q.CurrentPlayer.RatingChange = append(q.CurrentPlayer.RatingChange, p.I[1])
 }
 
 func (q *KurnikBot) JoinSection(section string) {
@@ -376,7 +474,7 @@ func (q *KurnikBot) JoinSection(section string) {
 }
 
 func (q *KurnikBot) ReceivePlayerList(p PayloadIntString) {
-	q.PlayerList = make(map[string]User)
+	q.PlayerList = make(PlayerList)
 
 	n := 3
 	for _, name := range p.S {

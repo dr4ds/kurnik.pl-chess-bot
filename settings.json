@@ -1,0 +1,16 @@
+{
+  "account": {
+    "login": "",
+    "password": ""
+  },
+  "engine_depth": 20,
+  "engine_path": "engines/asmfish",
+  "engine_options": {
+    "LogFile": "engines/log.txt",
+    "Threads": "1",
+    "Hash": "256",
+    "OwnBook": "true",
+    "BookFile": "books/book.bin",
+    "BestBookMove": "true"
+  }
+}
