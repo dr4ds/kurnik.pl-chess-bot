@@ -15,10 +15,10 @@ import (
 
 var settingsFilePath = flag.String("settings", "settings.json", "path to settings file")
 
-func LoadBotSettings(path string) (*kurnik.BotSettings, error) {
-	s := new(kurnik.BotSettings)
+func LoadBotSettings(path string) (kurnik.BotSettings, error) {
+	s := kurnik.BotSettings{}
 
-	err := utils.LoadJsonFile(path, s)
+	err := utils.LoadJsonFile(path, &s)
 
 	return s, err
 }
@@ -32,7 +32,7 @@ func SaveBotSettings(bs kurnik.BotSettings) error {
 	return err
 }
 
-func CreateBotFromSettings(bs *kurnik.BotSettings) *kurnik.KurnikBot {
+func CreateBotFromSettings(bs kurnik.BotSettings) *kurnik.KurnikBot {
 	e := new(uci.ChessEngine)
 	err := e.LoadEngine(bs.EnginePath)
 	if err != nil {
@@ -46,6 +46,7 @@ func CreateBotFromSettings(bs *kurnik.BotSettings) *kurnik.KurnikBot {
 
 	bot := new(kurnik.KurnikBot)
 	bot.Engine = e
+	bot.BotSettings = bs
 
 	return bot
 }
@@ -72,11 +73,11 @@ func main() {
 	time.Sleep(time.Second * 1)
 
 	bot.JoinSection("#100...")
+	time.Sleep(time.Second * 1)
 	bot.CreateRoom()
 
 	time.Sleep(time.Second * 1)
 	bot.TakeSeat(0)
-	//
 
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, os.Interrupt)
