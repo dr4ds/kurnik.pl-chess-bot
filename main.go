@@ -79,6 +79,8 @@ func main() {
 	time.Sleep(time.Second * 1)
 	bot.TakeSeat(0)
 
+	bot.StartWebServer()
+
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, os.Interrupt)
 

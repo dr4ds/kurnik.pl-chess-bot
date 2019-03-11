@@ -3,6 +3,7 @@ package kurnik
 import (
 	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"net/http"
@@ -78,6 +79,7 @@ type KurnikBot struct {
 	Engine         *uci.ChessEngine
 	Running        bool
 	BotSettings    BotSettings
+	WebClients     WebClientList
 }
 
 type Game struct {
@@ -165,7 +167,7 @@ func BuildLoginPayload(sessionID string) PayloadIntString {
 	p := PayloadIntString{
 		[]int{1710},
 		[]string{
-			sessionID + "+223834712694889075||",
+			sessionID + "+" + randstr.RandomString(18, "1234567890") + "||",
 			"en",
 			"b",
 			"",
@@ -243,10 +245,9 @@ func (q *KurnikBot) Exit() error {
 func (q *KurnikBot) StartListening() {
 	for q.Running {
 		var p PayloadIntString
-		// TODO change it so it doesnt panic when bot is exiting
 		_, b, err := q.Connection.ReadMessage()
 		if err != nil {
-			panic(err)
+			return
 		}
 		if len(b) > 0 {
 			err := json.Unmarshal(b, &p)
@@ -254,6 +255,63 @@ func (q *KurnikBot) StartListening() {
 				panic(err)
 			}
 			q.HandleCommands(p)
+		}
+	}
+}
+
+func (q *KurnikBot) BroadcastWebSocketMessage(p *WebPayload) {
+	for _, v := range q.WebClients {
+		WebSocketWriteJson(v, p)
+	}
+}
+
+func WebSocketWriteJson(conn *websocket.Conn, p *WebPayload) error {
+	b, err := json.Marshal(p)
+	if err != nil {
+		return err
+	}
+
+	return conn.WriteMessage(websocket.TextMessage, b)
+}
+
+func (q *KurnikBot) HandleWebSocketMessage(p WebPayload, conn *websocket.Conn) {
+	switch p.Command {
+	case "init_rating":
+		wp := WebPayload{}
+		wp.Command = "add_rating"
+		wp.Data = q.CurrentPlayer.RatingChange
+
+		WebSocketWriteJson(conn, &wp)
+	case "depth":
+		v, ok := p.Data.(int)
+		if ok {
+			q.BotSettings.EngineDepth = v
+		}
+	case "kick_low_elo":
+		v, ok := p.Data.(bool)
+		if ok {
+			q.BotSettings.KickIfLowElo = v
+		}
+	case "auto_start":
+		v, ok := p.Data.(bool)
+		if ok {
+			q.BotSettings.AutoStartGame = v
+		}
+	case "create_room":
+		q.CreateRoom()
+	case "join_section":
+		v, ok := p.Data.(string)
+		if ok {
+			found := false
+			for _, s := range q.SectionsList {
+				if s == v {
+					found = true
+					break
+				}
+			}
+			if found {
+				q.JoinSection(v)
+			}
 		}
 	}
 }
@@ -291,8 +349,14 @@ func (q *KurnikBot) HandleCommands(p PayloadIntString) {
 	}
 }
 
-// TODO
-func (q *KurnikBot) KickPlayer() {}
+func (q *KurnikBot) KickEnemyFromSeat() {
+	seatToKick := 1
+	if q.CurrentPlayer.CurrentSeat == 1 {
+		seatToKick = 0
+	}
+	p := PayloadInt{[]int{84, q.CurrentPlayer.User.RoomID, seatToKick}}
+	q.SendMessage(&p)
+}
 
 func (q *KurnikBot) GetMoveFromEngine() (Move, error) {
 	m := Move{}
@@ -402,10 +466,6 @@ func (q *KurnikBot) HandlePlayerUpdate(p PayloadIntString) {
 	q.PlayerList[p.S[0]] = u
 	if q.CurrentPlayer.User.Name == u.Name {
 		q.CurrentPlayer.User = u
-
-		if q.CurrentPlayer.RatingChange[len(q.CurrentPlayer.RatingChange)-1] != u.Rating {
-			q.CurrentPlayer.RatingChange = append(q.CurrentPlayer.RatingChange, u.Rating)
-		}
 	}
 }
 
@@ -449,7 +509,7 @@ func (q *KurnikBot) ReceiveRoomUpdate(p PayloadIntString) {
 			q.Game.EloChange = CalculateEloChange(e1, e2)
 
 			if q.BotSettings.KickIfLowElo && q.Game.EloChange.Win <= 0 {
-				q.KickPlayer() //TODO
+				q.KickEnemyFromSeat()
 			} else if q.BotSettings.AutoStartGame {
 				q.StartMatch()
 			}
@@ -474,6 +534,9 @@ func (q *KurnikBot) ReceiveRating(p PayloadIntString) {
 		}
 	}
 	q.CurrentPlayer.RatingChange = append(q.CurrentPlayer.RatingChange, p.I[1])
+
+	wp := WebPayload{"add_rating", []int{p.I[1]}}
+	q.BroadcastWebSocketMessage(&wp)
 }
 
 func (q *KurnikBot) JoinSection(section string) {
@@ -542,6 +605,10 @@ func GetSessionID(login, password string) string {
 	// 61 =
 	// 58 :
 	buf := resp.Header.PeekCookie("ksession")
+	if len(buf) == 0 {
+		panic(errors.New("login failed"))
+	}
+
 	var n1, n2 int
 	for i := 0; i < len(buf); i++ {
 		if buf[i] == 61 {
