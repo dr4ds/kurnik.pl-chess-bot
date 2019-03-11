@@ -39,6 +39,8 @@ type BotSettings struct {
 	} `json:"account"`
 	EngineDepth   int               `json:"engine_depth"`
 	EnginePath    string            `json:"engine_path"`
+	AutoStartGame bool              `json:"auto_start"`
+	KickIfLowElo  bool              `json:"kick_low_elo"`
 	EngineOptions map[string]string `json:"engine_options"`
 }
 
@@ -241,6 +243,7 @@ func (q *KurnikBot) Exit() error {
 func (q *KurnikBot) StartListening() {
 	for q.Running {
 		var p PayloadIntString
+		// TODO change it so it doesnt panic when bot is exiting
 		_, b, err := q.Connection.ReadMessage()
 		if err != nil {
 			panic(err)
@@ -287,6 +290,9 @@ func (q *KurnikBot) HandleCommands(p PayloadIntString) {
 		q.ReceiveMove(p)
 	}
 }
+
+// TODO
+func (q *KurnikBot) KickPlayer() {}
 
 func (q *KurnikBot) GetMoveFromEngine() (Move, error) {
 	m := Move{}
@@ -370,17 +376,6 @@ func (q *KurnikBot) HandleStartGame(p PayloadIntString) {
 	if len(p.I) <= 2 {
 		q.Game.IsWhite = true
 	}
-	room := q.GetCurrentRoom()
-
-	var e1, e2 int
-	if q.CurrentPlayer.CurrentSeat == 0 {
-		e1 = room.Seat1.Player.Rating
-		e2 = room.Seat2.Player.Rating
-	} else {
-		e1 = room.Seat2.Player.Rating
-		e2 = room.Seat1.Player.Rating
-	}
-	q.Game.EloChange = CalculateEloChange(e1, e2)
 }
 
 func (q *KurnikBot) GetCurrentRoom() Room {
@@ -441,7 +436,23 @@ func (q *KurnikBot) ReceiveRoomUpdate(p PayloadIntString) {
 
 	if r.N == q.CurrentPlayer.User.RoomID {
 		if r.Seat1.Taken && r.Seat2.Taken {
-			q.StartMatch()
+			room := q.GetCurrentRoom()
+
+			var e1, e2 int
+			if q.CurrentPlayer.CurrentSeat == 0 {
+				e1 = room.Seat1.Player.Rating
+				e2 = room.Seat2.Player.Rating
+			} else {
+				e1 = room.Seat2.Player.Rating
+				e2 = room.Seat1.Player.Rating
+			}
+			q.Game.EloChange = CalculateEloChange(e1, e2)
+
+			if q.BotSettings.KickIfLowElo && q.Game.EloChange.Win <= 0 {
+				q.KickPlayer() //TODO
+			} else if q.BotSettings.AutoStartGame {
+				q.StartMatch()
+			}
 		}
 	}
 }

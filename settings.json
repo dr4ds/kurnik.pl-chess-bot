@@ -5,6 +5,8 @@
   },
   "engine_depth": 20,
   "engine_path": "engines/asmfish",
+  "auto_start": true,
+  "kick_low_elo": true,
   "engine_options": {
     "LogFile": "engines/log.txt",
     "Threads": "1",
