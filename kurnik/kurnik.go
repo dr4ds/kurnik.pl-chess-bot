@@ -167,7 +167,7 @@ func BuildLoginPayload(sessionID string) PayloadIntString {
 	p := PayloadIntString{
 		[]int{1710},
 		[]string{
-			sessionID + "+" + randstr.RandomString(18, "1234567890") + "||",
+			sessionID + "+" + randstr.String(18, "1234567890") + "||",
 			"en",
 			"b",
 			"",

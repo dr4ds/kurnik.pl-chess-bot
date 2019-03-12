@@ -6,7 +6,6 @@ class App extends React.Component {
     super(props);
 
     this.handleMessage = this.handleMessage.bind(this);
-    this.addChartRow = this.addChartRow.bind(this);
 
     this.ws = new WebSocket("ws://localhost:8080/ws");
 
@@ -31,21 +30,17 @@ class App extends React.Component {
       chart_data: [["X", "Rating"]]
     };
   }
-  addChartRow(row) {
-    var arr = this.state.chart_data;
-    arr.push([arr.length, row]);
-
-    this.setState({ chart_data: arr });
-  }
   handleMessage(e) {
     console.log(e.data);
     var obj = JSON.parse(e.data);
 
     switch (obj.command) {
       case "add_rating":
+        var arr = this.state.chart_data;
         obj.data.forEach(e => {
-          this.addChartRow(e);
+          arr.push([arr.length, e]);
         });
+        this.setState({ chart_data: arr });
         break;
       default:
         break;
