@@ -42,6 +42,8 @@ type BotSettings struct {
 	EnginePath    string            `json:"engine_path"`
 	AutoStartGame bool              `json:"auto_start"`
 	KickIfLowElo  bool              `json:"kick_low_elo"`
+	KickIfLose    bool              `json:"kick_if_lose"`
+	KickIfDraw    bool              `json:"kick_if_draw"`
 	EngineOptions map[string]string `json:"engine_options"`
 }
 
@@ -102,8 +104,7 @@ type Room struct {
 	N      int
 	InGame bool
 	Time   string
-	Seat1  Seat
-	Seat2  Seat
+	Seats  map[int]Seat
 }
 
 type Move struct {
@@ -131,6 +132,8 @@ func CalculateEloChange(e1, e2 int) EloChange {
 
 func (q *KurnikBot) NewRoomObject(i []int, s []string) Room {
 	r := Room{}
+	r.Seats = make(map[int]Seat)
+
 	r.N = i[0]
 	if i[1] == 1 {
 		r.InGame = true
@@ -138,24 +141,16 @@ func (q *KurnikBot) NewRoomObject(i []int, s []string) Room {
 
 	r.Time = s[0]
 
-	s1 := Seat{}
-	if i[2] == 1 {
-		s1.Taken = true
+	for j := 0; j < 2; j++ {
+		seat := Seat{}
+		if i[2+j] == 1 {
+			seat.Taken = true
+		}
+		if s[1+j] != "" {
+			seat.Player = q.PlayerList[s[1+j]]
+		}
+		r.Seats[j] = seat
 	}
-	if s[1] != "" {
-		s1.Player = q.PlayerList[s[1]]
-	}
-
-	s2 := Seat{}
-	if i[3] == 1 {
-		s2.Taken = true
-	}
-	if s[2] != "" {
-		s2.Player = q.PlayerList[s[2]]
-	}
-
-	r.Seat1 = s1
-	r.Seat2 = s2
 
 	return r
 }
@@ -349,6 +344,11 @@ func (q *KurnikBot) HandleCommands(p PayloadIntString) {
 	}
 }
 
+func (q *KurnikBot) KickPlayerFromRoom(name string) {
+	p := PayloadIntString{[]int{81, q.CurrentPlayer.User.RoomID}, []string{"/boot " + name}}
+	q.SendMessage(&p)
+}
+
 func (q *KurnikBot) KickEnemyFromSeat() {
 	seatToKick := 1
 	if q.CurrentPlayer.CurrentSeat == 1 {
@@ -433,6 +433,26 @@ func (q *KurnikBot) ReceiveMove(p PayloadIntString) {
 	if err != nil {
 		panic(err)
 	}
+	switch q.Game.Chess.Outcome() {
+	case chess.WhiteWon:
+		if !q.Game.IsWhite {
+			if q.BotSettings.KickIfLose {
+				q.KickPlayerFromRoom(q.GetCurrentEnemy().Name)
+			}
+		}
+	case chess.BlackWon:
+		if q.Game.IsWhite {
+			if q.BotSettings.KickIfLose {
+				q.KickPlayerFromRoom(q.GetCurrentEnemy().Name)
+			}
+		}
+	case chess.Draw:
+		if q.BotSettings.KickIfDraw {
+			if q.Game.EloChange.Draw < 0 {
+				q.KickPlayerFromRoom(q.GetCurrentEnemy().Name)
+			}
+		}
+	}
 }
 
 func (q *KurnikBot) HandleStartGame(p PayloadIntString) {
@@ -440,6 +460,7 @@ func (q *KurnikBot) HandleStartGame(p PayloadIntString) {
 	if len(p.I) <= 2 {
 		q.Game.IsWhite = true
 	}
+	q.Game.EloChange = q.GetEloChange()
 }
 
 func (q *KurnikBot) GetCurrentRoom() Room {
@@ -490,25 +511,36 @@ func (q *KurnikBot) ReceiveRoomList(p PayloadIntString) {
 	}
 }
 
+func (q *KurnikBot) GetCurrentEnemy() User {
+	room := q.GetCurrentRoom()
+
+	if q.CurrentPlayer.CurrentSeat == 0 {
+		if room.Seats[1].Taken {
+			return room.Seats[1].Player
+		}
+	}
+	return room.Seats[0].Player
+}
+
+func (q *KurnikBot) GetEloChange() EloChange {
+	room := q.GetCurrentRoom()
+
+	e1 := room.Seats[0].Player.Rating
+	e2 := room.Seats[1].Player.Rating
+
+	return CalculateEloChange(e1, e2)
+}
+
 func (q *KurnikBot) ReceiveRoomUpdate(p PayloadIntString) {
 	r := q.NewRoomObject(p.I[1:5], p.S[0:3])
 	q.RoomList[r.N] = r
 
 	if r.N == q.CurrentPlayer.User.RoomID {
-		if r.Seat1.Taken && r.Seat2.Taken {
-			room := q.GetCurrentRoom()
+		if r.Seats[0].Taken && r.Seats[1].Taken {
 
-			var e1, e2 int
-			if q.CurrentPlayer.CurrentSeat == 0 {
-				e1 = room.Seat1.Player.Rating
-				e2 = room.Seat2.Player.Rating
-			} else {
-				e1 = room.Seat2.Player.Rating
-				e2 = room.Seat1.Player.Rating
-			}
-			q.Game.EloChange = CalculateEloChange(e1, e2)
+			change := q.GetEloChange()
 
-			if q.BotSettings.KickIfLowElo && q.Game.EloChange.Win <= 0 {
+			if q.BotSettings.KickIfLowElo && change.Win <= 0 {
 				q.KickEnemyFromSeat()
 			} else if q.BotSettings.AutoStartGame {
 				q.StartMatch()

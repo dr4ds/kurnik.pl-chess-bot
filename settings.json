@@ -7,6 +7,8 @@
   "engine_path": "engines/asmfish",
   "auto_start": true,
   "kick_low_elo": true,
+  "kick_if_lose": true,
+  "kick_if_draw": true,
   "engine_options": {
     "LogFile": "engines/log.txt",
     "Threads": "1",
