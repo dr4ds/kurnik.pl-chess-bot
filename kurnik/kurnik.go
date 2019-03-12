@@ -431,7 +431,7 @@ func (q *KurnikBot) RecievePossibleMoves(p PayloadIntString) {
 				q.KickPlayerFromRoom(q.GetCurrentEnemy().Name)
 			}
 		case 9:
-			if q.BotSettings.KickIfDraw && q.Game.EloChange.Draw <= 0 {
+			if q.BotSettings.KickIfDraw && q.Game.EloChange.Draw > 0 {
 				q.KickPlayerFromRoom(q.GetCurrentEnemy().Name)
 			}
 		}
