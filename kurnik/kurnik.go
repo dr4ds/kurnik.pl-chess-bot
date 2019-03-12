@@ -79,9 +79,9 @@ type KurnikBot struct {
 	PlayerList     PlayerList
 	Game           Game
 	Engine         *uci.ChessEngine
-	Running        bool
 	BotSettings    BotSettings
 	WebClients     WebClientList
+	Running        bool
 }
 
 type Game struct {
@@ -332,7 +332,7 @@ func (q *KurnikBot) HandleCommands(p PayloadIntString) {
 	case 71:
 		q.ReceiveRoomList(p)
 	case 73:
-		q.RecieveRoomCreation(p)
+		q.RecieveCurrentRoom(p)
 	case 88:
 		q.RecieveRoomSeat(p)
 	case 90:
@@ -400,27 +400,41 @@ func (q *KurnikBot) SendMove(m Move, time int64) {
 	q.SendMessage(&sp)
 }
 
-func (q *KurnikBot) RecieveRoomCreation(p PayloadIntString) {
+func (q *KurnikBot) RecieveCurrentRoom(p PayloadIntString) {
 	q.CurrentPlayer.User.RoomID = p.I[1]
 }
 
 func (q *KurnikBot) RecievePossibleMoves(p PayloadIntString) {
 	q.Game.Turn = p.I[3]
-	if q.Game.Turn > -1 && q.CurrentPlayer.CurrentSeat == q.Game.Turn {
-		start := time.Now()
+	if q.Game.Turn > -1 {
+		if q.CurrentPlayer.CurrentSeat == q.Game.Turn {
+			start := time.Now()
 
-		m, err := q.GetMoveFromEngine()
-		if err != nil {
-			panic(err)
+			m, err := q.GetMoveFromEngine()
+			if err != nil {
+				panic(err)
+			}
+
+			elapsed := time.Since(start)
+			t := elapsed.Nanoseconds() / 100000000
+			if t <= 0 {
+				t = 1
+			}
+
+			q.SendMove(m, t)
 		}
-
-		elapsed := time.Since(start)
-		t := elapsed.Nanoseconds() / 100000000
-		if t <= 0 {
-			t = 1
+	} else {
+		switch p.I[4] {
+		// case 0: // Won game
+		case 1:
+			if q.BotSettings.KickIfLose {
+				q.KickPlayerFromRoom(q.GetCurrentEnemy().Name)
+			}
+		case 9:
+			if q.BotSettings.KickIfDraw && q.Game.EloChange.Draw <= 0 {
+				q.KickPlayerFromRoom(q.GetCurrentEnemy().Name)
+			}
 		}
-
-		q.SendMove(m, t)
 	}
 }
 
@@ -433,32 +447,14 @@ func (q *KurnikBot) ReceiveMove(p PayloadIntString) {
 	if err != nil {
 		panic(err)
 	}
-	switch q.Game.Chess.Outcome() {
-	case chess.WhiteWon:
-		if !q.Game.IsWhite {
-			if q.BotSettings.KickIfLose {
-				q.KickPlayerFromRoom(q.GetCurrentEnemy().Name)
-			}
-		}
-	case chess.BlackWon:
-		if q.Game.IsWhite {
-			if q.BotSettings.KickIfLose {
-				q.KickPlayerFromRoom(q.GetCurrentEnemy().Name)
-			}
-		}
-	case chess.Draw:
-		if q.BotSettings.KickIfDraw {
-			if q.Game.EloChange.Draw < 0 {
-				q.KickPlayerFromRoom(q.GetCurrentEnemy().Name)
-			}
-		}
-	}
 }
 
 func (q *KurnikBot) HandleStartGame(p PayloadIntString) {
 	q.Game.Chess = chess.NewGame(chess.UseNotation(chess.AlgebraicNotation{}))
-	if len(p.I) <= 2 {
+	if len(p.I) == 2 {
 		q.Game.IsWhite = true
+	} else {
+		q.Game.IsWhite = false
 	}
 	q.Game.EloChange = q.GetEloChange()
 }
@@ -537,7 +533,6 @@ func (q *KurnikBot) ReceiveRoomUpdate(p PayloadIntString) {
 
 	if r.N == q.CurrentPlayer.User.RoomID {
 		if r.Seats[0].Taken && r.Seats[1].Taken {
-
 			change := q.GetEloChange()
 
 			if q.BotSettings.KickIfLowElo && change.Win <= 0 {
