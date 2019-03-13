@@ -23,15 +23,30 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-const userAgent = `Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:66.0) Gecko/20100101 Firefox/66.0`
-
 var x = []byte("abcdefgh")
 var y = []byte("87654321")
 
 var promotionOptions = []byte("qnbr")
 
+const userAgent = `Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:66.0) Gecko/20100101 Firefox/66.0`
+
+const (
+	MatchResultWin  MatchResult = 0
+	MatchResultLoss MatchResult = 1
+	MatchResultDraw MatchResult = 2
+)
+
+const (
+	GameStateInGame GameState = 8
+	GameStateLost   GameState = 1
+	GameStateWon    GameState = 0
+	GameStateDraw   GameState = 9
+)
+
 type PlayerList map[string]User
 type RoomList map[int]Room
+type GameState int
+type MatchResult int
 
 type BotSettings struct {
 	Account struct {
@@ -81,7 +96,17 @@ type KurnikBot struct {
 	Engine         *uci.ChessEngine
 	BotSettings    BotSettings
 	WebClients     WebClientList
+	MatchHistory   []Match
+	LastGameState  GameState
 	Running        bool
+}
+
+type Match struct {
+	Player      User
+	Opponent    User
+	MarchResult MatchResult
+	EloChange   int
+	PGN         string
 }
 
 type Game struct {
@@ -100,6 +125,7 @@ type OpenedRoom struct {
 	Base       Room
 	PlayerList PlayerList
 }
+
 type Room struct {
 	N      int
 	InGame bool
@@ -113,6 +139,7 @@ type Move struct {
 	To          string
 	isPromotion bool
 }
+
 type EloChange struct {
 	Win  int
 	Loss int
@@ -406,36 +433,55 @@ func (q *KurnikBot) RecieveCurrentRoom(p PayloadIntString) {
 
 func (q *KurnikBot) RecievePossibleMoves(p PayloadIntString) {
 	q.Game.Turn = p.I[3]
-	if q.Game.Turn > -1 {
-		if q.CurrentPlayer.CurrentSeat == q.Game.Turn {
-			start := time.Now()
+	gs := GameState(p.I[4])
 
-			m, err := q.GetMoveFromEngine()
-			if err != nil {
-				panic(err)
-			}
+	if q.CurrentPlayer.CurrentSeat == q.Game.Turn && gs == GameStateInGame {
+		start := time.Now()
 
-			elapsed := time.Since(start)
-			t := elapsed.Nanoseconds() / 100000000
-			if t <= 0 {
-				t = 1
-			}
-
-			q.SendMove(m, t)
+		m, err := q.GetMoveFromEngine()
+		if err != nil {
+			panic(err)
 		}
-	} else {
-		switch p.I[4] {
-		// case 0: // Won game
-		case 1:
-			if q.BotSettings.KickIfLose {
+
+		elapsed := time.Since(start)
+		t := elapsed.Nanoseconds() / 100000000
+		if t <= 0 {
+			t = 1
+		}
+
+		q.SendMove(m, t)
+
+	} else { // game ended
+
+		m := Match{}
+		m.Player = q.CurrentPlayer.User
+		m.Opponent = q.GetCurrentEnemy()
+		m.PGN = q.Game.Chess.String()
+
+		switch gs {
+		case GameStateWon:
+			m.MarchResult = MatchResultWin
+			m.EloChange = q.Game.EloChange.Win
+
+		case GameStateLost:
+			m.MarchResult = MatchResultLoss
+			m.EloChange = q.Game.EloChange.Loss
+
+			if q.BotSettings.KickIfLose && q.LastGameState == GameStateInGame {
 				q.KickPlayerFromRoom(q.GetCurrentEnemy().Name)
 			}
-		case 9:
-			if q.BotSettings.KickIfDraw && q.Game.EloChange.Draw > 0 {
+
+		case GameStateDraw:
+			m.MarchResult = MatchResultDraw
+			m.EloChange = q.Game.EloChange.Draw
+
+			if q.BotSettings.KickIfDraw && q.Game.EloChange.Draw > 0 && q.LastGameState == GameStateInGame {
 				q.KickPlayerFromRoom(q.GetCurrentEnemy().Name)
 			}
 		}
+		q.MatchHistory = append(q.MatchHistory, m)
 	}
+	q.LastGameState = gs
 }
 
 func (q *KurnikBot) RecieveRoomSeat(p PayloadIntString) {
