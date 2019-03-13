@@ -435,7 +435,9 @@ func (q *KurnikBot) RecievePossibleMoves(p PayloadIntString) {
 	q.Game.Turn = p.I[3]
 	gs := GameState(p.I[4])
 
-	if q.CurrentPlayer.CurrentSeat == q.Game.Turn && gs == GameStateInGame {
+	if q.Game.Turn != -1 &&
+		q.CurrentPlayer.CurrentSeat == q.Game.Turn &&
+		gs == GameStateInGame {
 		start := time.Now()
 
 		m, err := q.GetMoveFromEngine()
@@ -451,7 +453,7 @@ func (q *KurnikBot) RecievePossibleMoves(p PayloadIntString) {
 
 		q.SendMove(m, t)
 
-	} else { // game ended
+	} else if q.LastGameState == GameStateInGame {
 
 		m := Match{}
 		m.Player = q.CurrentPlayer.User
