@@ -12,7 +12,7 @@ class App extends React.Component {
     this.ws.onopen = () => {
       this.setState({ connected: true });
     };
-    this.ws.onerror = () => {
+    this.ws.onerror = (e) => {
       console.log("ws error:", e);
     };
     this.ws.onmessage = e => {
