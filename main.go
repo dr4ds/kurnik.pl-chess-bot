@@ -8,9 +8,9 @@ import (
 	"os/signal"
 	"time"
 
-	"./kurnik"
-	"./uci"
-	"./utils"
+	"main/kurnik"
+	"main/uci"
+	"main/utils"
 )
 
 var settingsFilePath = flag.String("settings", "settings.json", "path to settings file")

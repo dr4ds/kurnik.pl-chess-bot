@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"../utils"
+	"main/utils"
 	"github.com/gorilla/websocket"
 	uuid "github.com/satori/go.uuid"
 )
@@ -34,7 +34,7 @@ func (q *KurnikBot) StartWebServer() {
 			return
 		}
 
-		u1 := uuid.Must(uuid.NewV4())
+		u1 := uuid.Must(uuid.NewV4(), nil)
 		q.WebClients[u1.String()] = conn
 		defer q.WebClients.Remove(u1.String())
 
@@ -59,7 +59,7 @@ func (q *KurnikBot) StartWebServer() {
 		}
 	})
 
-	fs := http.FileServer(http.Dir("dashboard/dist/"))
+	fs := http.FileServer(http.Dir("dashboard/build/"))
 	http.Handle("/", fs)
 	// TODO load port from settings.json
 	http.ListenAndServe(":8080", nil)
