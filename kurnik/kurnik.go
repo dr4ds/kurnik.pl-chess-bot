@@ -672,6 +672,6 @@ func GetSessionID(login, password string) string {
 	// 61 =
 	// 58 :
 	cookies := resp.Request.Response.Header["Set-Cookie"][1]
-	var cookie = strings.Split(strings.Split(cookies, " ")[0], "=")[1]
+	var cookie = strings.Split(strings.Split(cookies, ":")[0], "=")[1]
 	return cookie
 }
