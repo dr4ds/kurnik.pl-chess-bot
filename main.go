@@ -3,14 +3,13 @@ package main
 import (
 	"encoding/json"
 	"flag"
-	"io/ioutil"
 	"os"
 	"os/signal"
 	"time"
 
-	"./kurnik"
-	"./uci"
-	"./utils"
+	"main/kurnik"
+	"main/uci"
+	"main/utils"
 )
 
 var settingsFilePath = flag.String("settings", "settings.json", "path to settings file")
@@ -28,7 +27,7 @@ func SaveBotSettings(bs kurnik.BotSettings) error {
 	if err != nil {
 		return err
 	}
-	err = ioutil.WriteFile(*settingsFilePath, b, os.ModePerm)
+	err = os.WriteFile(*settingsFilePath, b, os.ModePerm)
 	return err
 }
 

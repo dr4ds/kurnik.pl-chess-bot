@@ -4,7 +4,7 @@
     "password": ""
   },
   "engine_depth": 20,
-  "engine_path": "engines/asmfish",
+  "engine_path": "/usr/bin/stockfish",
   "auto_start": true,
   "kick_low_elo": true,
   "kick_if_lose": true,

@@ -1,9 +1,7 @@
 package kurnik
 
 import (
-	"crypto/tls"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"math"
 	"net/http"
@@ -11,12 +9,10 @@ import (
 	"strings"
 	"time"
 
-	"../uci"
-	"../utils"
+	"main/uci"
+	"main/utils"
 
 	"github.com/notnil/chess"
-
-	"github.com/valyala/fasthttp"
 
 	"github.com/thanhpk/randstr"
 
@@ -659,41 +655,23 @@ func (q *KurnikBot) SendMessage(v interface{}) {
 }
 
 func GetSessionID(login, password string) string {
-	req := fasthttp.AcquireRequest()
-	req.SetRequestURI("https://www.kurnik.pl/login.phtml")
-	req.Header.SetMethod("POST")
-	req.Header.Add("User-Agent", userAgent)
-	req.SetBodyString("cc=0&username=" + login + "&pw=" + password)
-
-	resp := fasthttp.AcquireResponse()
-	defer fasthttp.ReleaseResponse(resp)
-
-	client := &fasthttp.Client{
-		TLSConfig: &tls.Config{InsecureSkipVerify: true},
-	}
-
-	if err := client.Do(req, resp); err != nil {
+	body := "cc=0&username=" + login + "&pw=" + password
+	req, err := http.NewRequest("POST", "https://www.kurnik.pl/login.phtml", strings.NewReader(body))
+	if err != nil {
 		panic(err)
 	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		panic(err)
+	}
+	defer resp.Body.Close()
 
 	// parse cookie
 	// 61 =
 	// 58 :
-	buf := resp.Header.PeekCookie("ksession")
-	if len(buf) == 0 {
-		panic(errors.New("login failed"))
-	}
-
-	var n1, n2 int
-	for i := 0; i < len(buf); i++ {
-		if buf[i] == 61 {
-			n1 = i
-			continue
-		}
-		if buf[i] == 58 {
-			n2 = i
-			break
-		}
-	}
-	return string(buf[n1+1 : n2])
+	cookies := resp.Request.Response.Header["Set-Cookie"][1]
+	var cookie = strings.Split(strings.Split(cookies, ":")[0], "=")[1]
+	return cookie
 }
