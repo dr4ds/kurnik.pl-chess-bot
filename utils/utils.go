@@ -3,7 +3,6 @@ package utils
 import (
 	"bufio"
 	"encoding/json"
-	"io/ioutil"
 	"log"
 	"os"
 	"strconv"
@@ -79,7 +78,7 @@ func ReadLinesFromFile(filepath string) (lines []string) {
 }
 
 func LoadJsonFile(filename string, v interface{}) error {
-	b, err := ioutil.ReadFile(filename)
+	b, err := os.ReadFile(filename)
 	if err != nil {
 		return err
 	}

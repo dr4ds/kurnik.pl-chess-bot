@@ -3,7 +3,6 @@ package main
 import (
 	"encoding/json"
 	"flag"
-	"io/ioutil"
 	"os"
 	"os/signal"
 	"time"
@@ -28,7 +27,7 @@ func SaveBotSettings(bs kurnik.BotSettings) error {
 	if err != nil {
 		return err
 	}
-	err = ioutil.WriteFile(*settingsFilePath, b, os.ModePerm)
+	err = os.WriteFile(*settingsFilePath, b, os.ModePerm)
 	return err
 }
 
